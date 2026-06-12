@@ -1,4 +1,3 @@
 #include "resource1.h"
 
-
-IDR_RCDATA1 RCDATA "icon.ico"
+IDR_RCDATA1 RCDATA "shellcode.bin"

